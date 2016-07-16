@@ -67,8 +67,7 @@ public class JedisIndex {
 	 * @return Set of URLs.
 	 */
 	public Set<String> getURLs(String term) {
-        // FILL THIS IN!
-		return null;
+        return jedis.smembers(urlSetKey(term));
 	}
 
     /**
@@ -78,8 +77,12 @@ public class JedisIndex {
 	 * @return Map from URL to count.
 	 */
 	public Map<String, Integer> getCounts(String term) {
-        // FILL THIS IN!
-		return null;
+        Map<String, Integer> map = new HashMap<String, Integer>();
+		Set<String> urlSet = getURLs(term);
+		for (String url: urlSet) {
+			map.put(url, getCount(url, term));
+		}
+		return map;
 	}
 
     /**
@@ -90,8 +93,9 @@ public class JedisIndex {
 	 * @return
 	 */
 	public Integer getCount(String url, String term) {
-        // FILL THIS IN!
-		return null;
+        String redisKey = termCounterKey(url);
+		String termCount = jedis.hget(redisKey, term);
+		return new Integer(termCount);
 	}
 
 
@@ -102,7 +106,41 @@ public class JedisIndex {
 	 * @param paragraphs  Collection of elements that should be indexed.
 	 */
 	public void indexPage(String url, Elements paragraphs) {
-        // FILL THIS IN!
+        System.out.println("Indexing " + url);
+		
+		// make a TermCounter and count the terms in the paragraphs
+		TermCounter tc = new TermCounter(url);
+		tc.processElements(paragraphs);
+		
+		// push the contents of the TermCounter to Redis
+		pushTermCounterToRedis(tc);
+	}
+
+
+	/**
+	 * Pushes the contents of the TermCounter to Redis.
+	 * 
+	 * @param tc
+	 * @return List of return values from Redis.
+	 */
+	public List<Object> pushTermCounterToRedis(TermCounter tc) {
+		Transaction t = jedis.multi();
+		
+		String url = tc.getLabel();
+		String hashname = termCounterKey(url);
+		
+		// if this page has already been indexed; delete the old hash
+		t.del(hashname);
+
+		// for each term, add an entry in the termcounter and a new
+		// member of the index
+		for (String term: tc.keySet()) {
+			Integer count = tc.get(term);
+			t.hset(hashname, term, count.toString());
+			t.sadd(urlSetKey(term), url);
+		}
+		List<Object> res = t.exec();
+		return res;
 	}
 
 	/**
